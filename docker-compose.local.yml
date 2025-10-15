@@ -1,0 +1,67 @@
+version: "3.8"
+
+services:
+  rabbitmq:
+    image: rabbitmq:alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+    volumes:
+      - rabbit_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+  
+  redis:
+    image: redis:7
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  auth_service:
+    build:
+      context: ./auth_service
+      dockerfile: Dockerfile
+    container_name: auth_service
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis: 
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    working_dir: /auth_service
+    command: ["uvicorn", "main:app", "--reload", "--host", "0.0.0.0"]
+    volumes:
+      - ./auth_service:/auth_service
+
+  mail_service:
+    build:
+      context: ./mail_service
+      dockerfile: Dockerfile
+    container_name: mail_service
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+  
+    env_file:
+      - ./mail_service/.env
+    working_dir: /mail_service
+    command: ["faststream", "run", "main:app"]
+    volumes:
+      - ./mail_service:/mail_service
+
+volumes:
+  rabbit_data:
+  redis_data:
