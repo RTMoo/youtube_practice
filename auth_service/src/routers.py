@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Response, status
 from faststream.rabbit.fastapi import RabbitRouter
 from sqlalchemy.exc import IntegrityError
 
+from .dependencies import UserModelDep
 from .redis import RedisDep
 from .schemas import (
     EmailSchema,
@@ -194,6 +195,11 @@ async def set_new_credentials(
 
     await cache.delete(f"email:{token}")
     await cache.delete(f"token:{email}")
+
+
+@router.get("/me")
+async def get_about_me(user: UserModelDep):
+    return user
 
 
 router.include_router(rb_router)
