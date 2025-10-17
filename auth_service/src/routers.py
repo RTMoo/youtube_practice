@@ -80,6 +80,7 @@ async def login(
         )
 
     access_token = security.create_access_token(uid=str(user.id))
+    refresh_token = security.create_refresh_token(uid=str(user.id))
 
     response.set_cookie(
         "access_token",
@@ -87,12 +88,18 @@ async def login(
         httponly=True,
         samesite="lax",
     )
+    response.set_cookie(
+        "refresh_token",
+        refresh_token,
+        httponly=True,
+        samesite="lax",
+    )
 
     return {"status": "OK"}
 
 
-@rb_router.post("/resend-code")
-async def resend_code(
+@rb_router.post("/resend_verification")
+async def resend_verification(
     payload: EmailSchema,
     cache: RedisDep,
     user_service: UserServiceDep,
@@ -125,18 +132,15 @@ async def resend_code(
     await cache.delete(f"verify:token:{payload.email}", f"email:{token}")
 
     await rb_router.broker.publish(
-        message={
-            "email": payload.email,
-            "old_token": token,
-        },
+        payload.email,
         queue="resend_verify_token",
     )
 
     return {"status": "OK"}
 
 
-@router.post("/set")
-async def set_new_credentials(
+@router.post("/verify_email")
+async def verify_email(
     token: str,
     credentials: SetCredentialsSchema,
     cache: RedisDep,
