@@ -1,23 +1,22 @@
 from fastapi import APIRouter, HTTPException, Response, status
 from faststream.rabbit.fastapi import RabbitRouter
 from sqlalchemy.exc import IntegrityError
-from authx import TokenPayload
 
 from .dependencies import UserModelDep
 from .redis import RedisDep
 from .schemas import (
     ChangePasswordSchema,
     EmailSchema,
+    ResetPasswordSchema,
     SetCredentialsSchema,
     UserLoginSchema,
 )
 from .services import UserServiceDep
 from .settings import security, settings
-from .utils import generate_token, hash_password, verify_password
+from .utils import hash_password, verify_password
 
 router = APIRouter()
 rb_router = RabbitRouter(settings.FASTSTREAM_RABBITMQ_URL)
-verify_token_url = "http://0.0.0.0:8000/verify?token="
 
 
 @rb_router.post("/pre_register")
@@ -34,8 +33,9 @@ async def pre_register(
             detail="Эта почта уже подтверждена.",
         )
 
-    key = f"token:{payload.email}"
+    key = f"verify:token:{payload.email}"
     token_exists = await cache.exists(key)
+
     if token_exists > 0:
         raise HTTPException(
             status_code=429,
@@ -46,26 +46,9 @@ async def pre_register(
     except IntegrityError:
         pass
 
-    token = generate_token()
-
-    await cache.setex(
-        name=f"email:{token}",
-        time=settings.TOKEN_LIFETIME,
-        value=payload.email,
-    )
-
-    await cache.setex(
-        name=f"token:{payload.email}",
-        time=settings.TOKEN_LIFETIME,
-        value=token,
-    )
-
     await rb_router.broker.publish(
-        message={
-            "email": payload.email,
-            "message": verify_token_url + token,
-        },
-        queue="send_mail",
+        payload.email,
+        queue="send_verify_token",
     )
 
     return {"status": "OK"}
@@ -121,7 +104,7 @@ async def resend_code(
             detail="Эта почта уже подтверждена.",
         )
 
-    key = f"token:{payload.email}"
+    key = f"verify:token:{payload.email}"
     existing_ttl = await cache.ttl(key)
 
     if existing_ttl > 0:
@@ -131,28 +114,22 @@ async def resend_code(
         if remains > 0:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Код уже отправлен. Повторно можно через {remains} секунд.",
+                detail=f"Токен уже отправлен. Повторно можно через {remains} секунд.",
             )
     else:
         raise HTTPException(
             status_code=404,
             detail="Токен не найден или истёк. Пройдите регистрацию заново.",
         )
-
     token = await cache.get(key)
-    if not token:
-        raise HTTPException(
-            status_code=404,
-            detail="Токен не найден или истёк. Пройдите регистрацию заново.",
-        )
-    token = token.decode()
+    await cache.delete(f"verify:token:{payload.email}", f"email:{token}")
 
     await rb_router.broker.publish(
         message={
             "email": payload.email,
-            "message": verify_token_url + token,
+            "old_token": token,
         },
-        queue="send_mail",
+        queue="resend_verify_token",
     )
 
     return {"status": "OK"}
@@ -165,11 +142,11 @@ async def set_new_credentials(
     cache: RedisDep,
     user_service: UserServiceDep,
 ):
-    email = await cache.get(f"email:{token}")
+    email = await cache.get(f"verify:email:{token}")
 
     if not email:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Токен истек либо не запрашивался",
         )
     email = email.decode()
@@ -188,8 +165,7 @@ async def set_new_credentials(
 
     await user_service.update(email=email, new_data=data)
 
-    await cache.delete(f"email:{token}")
-    await cache.delete(f"token:{email}")
+    await cache.delete(f"verify:email:{token}", f"verify:token:{email}")
 
 
 @router.get("/me")
@@ -211,6 +187,73 @@ async def change_password(
 
     hashed_password = hash_password(payload.new_password)
     await user_service.update(id=user.id, new_data={"password": hashed_password})
+
+    return {"status": "OK"}
+
+
+@rb_router.post("/forgot_password")
+async def forgot_password(
+    payload: EmailSchema,
+    cache: RedisDep,
+    user_service: UserServiceDep,
+):
+    token_exists = await cache.exists(f"reset:token:{payload.email}")
+
+    if token_exists:
+        raise HTTPException(
+            status_code=429,
+            detail="Токен уже отправлен ранее.",
+        )
+
+    user = await user_service.get(email=payload.email)
+
+    if not user or not user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Почта не подтверждена.",
+        )
+
+    await rb_router.broker.publish(
+        payload.email,
+        queue="send_reset_password_token",
+    )
+
+    return {"status": "OK"}
+
+
+@router.post("/reset_password")
+async def resend_password(
+    token: str,
+    payload: ResetPasswordSchema,
+    cache: RedisDep,
+    user_service: UserServiceDep,
+):
+    email = await cache.get(f"reset:email:{token}")
+
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Токен истек либо не запрашивался",
+        )
+
+    user = await user_service.get(email=email.decode())
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Неправильные данные",
+        )
+
+    if not user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Почта не подтверждена.",
+        )
+
+    data = {"password": hash_password(payload.new_password)}
+    await user_service.update(email=user.email, new_data=data)
+
+    await cache.delete(f"reset:email:{token}", f"reset:token:{email}")
 
     return {"status": "OK"}
 

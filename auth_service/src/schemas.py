@@ -34,3 +34,7 @@ class VerifyEmailSchema(SendCodeSchema):
 class ChangePasswordSchema(BaseModel):
     old_password: str = Field(min_length=8, max_length=255)
     new_password: str = Field(min_length=8, max_length=255)
+
+
+class ResetPasswordSchema(BaseModel):
+    new_password: str = Field(min_length=8, max_length=255)
