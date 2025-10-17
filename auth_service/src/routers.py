@@ -1,10 +1,12 @@
 from fastapi import APIRouter, HTTPException, Response, status
 from faststream.rabbit.fastapi import RabbitRouter
 from sqlalchemy.exc import IntegrityError
+from authx import TokenPayload
 
 from .dependencies import UserModelDep
 from .redis import RedisDep
 from .schemas import (
+    ChangePasswordSchema,
     EmailSchema,
     SetCredentialsSchema,
     UserLoginSchema,
@@ -95,17 +97,10 @@ async def login(
         )
 
     access_token = security.create_access_token(uid=str(user.id))
-    refresh_token = security.create_refresh_token(uid=str(user.id))
 
     response.set_cookie(
-        settings.JWT_ACCESS_COOKIE_NAME,
+        "access_token",
         access_token,
-        httponly=True,
-        samesite="lax",
-    )
-    response.set_cookie(
-        "refresh_token",
-        refresh_token,
         httponly=True,
         samesite="lax",
     )
@@ -200,6 +195,24 @@ async def set_new_credentials(
 @router.get("/me")
 async def get_about_me(user: UserModelDep):
     return user
+
+
+@router.post("/change_password")
+async def change_password(
+    user: UserModelDep,
+    user_service: UserServiceDep,
+    payload: ChangePasswordSchema,
+):
+    if not verify_password(payload.old_password, user.password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Некорректный пароль, попробуйте ещё раз или сбросьте пароль",
+        )
+
+    hashed_password = hash_password(payload.new_password)
+    await user_service.update(id=user.id, new_data={"password": hashed_password})
+
+    return {"status": "OK"}
 
 
 router.include_router(rb_router)
