@@ -1,4 +1,4 @@
-from authx.exceptions import JWTDecodeError, MissingTokenError
+from authx.exceptions import JWTDecodeError
 from fastapi import Request
 from fastapi.responses import JSONResponse
 

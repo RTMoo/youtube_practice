@@ -37,6 +37,7 @@ auth_config = AuthXConfig(
     JWT_REFRESH_COOKIE_NAME=settings.JWT_REFRESH_COOKIE_NAME,
     JWT_ACCESS_TOKEN_EXPIRES=settings.JWT_ACCESS_TOKEN_EXPIRES,
     JWT_REFRESH_TOKEN_EXPIRES=settings.JWT_REFRESH_TOKEN_EXPIRES,
+    JWT_CSRF_METHODS=[],  # ["POST", "PUT", "PATCH", "DELETE"]
 )
 
 security = AuthX(config=auth_config)

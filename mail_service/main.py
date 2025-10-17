@@ -1,5 +1,6 @@
 from faststream import FastStream
-from broker import broker
-import subscribers  # noqa
+from src.broker import broker
+from src import subscribers  # noqa
+
 
 app = FastStream(broker)
