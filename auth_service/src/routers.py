@@ -1,8 +1,15 @@
+from datetime import timedelta
+
 from fastapi import APIRouter, HTTPException, Response, status
 from faststream.rabbit.fastapi import RabbitRouter
 from sqlalchemy.exc import IntegrityError
 
-from .dependencies import UserModelDep
+from .dependencies import (
+    AccessTokenRequiredDep,
+    RefreshTokenDep,
+    RefreshTokenRequiredDep,
+    UserModelDep,
+)
 from .redis import RedisDep
 from .schemas import (
     ChangePasswordSchema,
@@ -79,8 +86,14 @@ async def login(
             detail="Аккаунт заблокирован",
         )
 
-    access_token = security.create_access_token(uid=str(user.id))
-    refresh_token = security.create_refresh_token(uid=str(user.id))
+    access_token = security.create_access_token(
+        uid=str(user.id),
+        expiry=timedelta(minutes=30),
+    )
+    refresh_token = security.create_refresh_token(
+        uid=str(user.id),
+        expiry=timedelta(days=7),
+    )
 
     response.set_cookie(
         "access_token",
@@ -258,6 +271,61 @@ async def resend_password(
     await user_service.update(email=user.email, new_data=data)
 
     await cache.delete(f"reset:email:{token}", f"reset:token:{email}")
+
+    return {"status": "OK"}
+
+
+@router.post(
+    "/logout",
+    dependencies=[
+        RefreshTokenRequiredDep,
+        AccessTokenRequiredDep,
+    ],
+)
+async def logout(
+    response: Response,
+    cache: RedisDep,
+    refresh_token: RefreshTokenDep,
+):
+    exp = int(refresh_token.exp.timestamp())
+
+    await cache.set(
+        name=f"blacklist:{refresh_token.jti}",
+        value=1,
+        exat=exp,
+    )
+
+    response.delete_cookie("refresh_token", httponly=True)
+    response.delete_cookie("access_token", httponly=True)
+
+    return {"status": "OK"}
+
+
+@router.post(
+    "/refresh",
+    dependencies=[RefreshTokenRequiredDep],
+)
+async def refresh(
+    response: Response,
+    refresh_token: RefreshTokenDep,
+    cache: RedisDep,
+):
+    print(refresh_token.jti)
+    if await cache.exists(f"blacklist:{refresh_token.jti}"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Токен не действителен.",
+        )
+
+    new_access_token = security.create_access_token(
+        uid=refresh_token.sub,
+    )
+    response.set_cookie(
+        key="access_token",
+        value=new_access_token,
+        httponly=True,
+        samesite="lax",
+    )
 
     return {"status": "OK"}
 
