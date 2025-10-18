@@ -9,6 +9,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 
 class Settings(BaseSettings):
     DATABASE_URL: str = f"sqlite+aiosqlite:///{ROOT_DIR}/db.sqlite3"
+    BASE_URL: str = "http://0.0.0.0:8000/"
 
     JWT_SECRET_KEY: str = "JWT_SECRET_KEY"
     JWT_ACCESS_COOKIE_NAME: str = "access_token"
@@ -20,7 +21,8 @@ class Settings(BaseSettings):
     FASTSTREAM_RABBITMQ_URL: str = "amqp://guest:guest@rabbitmq:5672/"
 
     MIN_RESEND_TOKEN_LIFETIME: int = 60
-    TOKEN_LIFETIME: int = 3600
+    VERIFY_TOKEN_LIFETIME: int = 3600
+    RESET_TOKEN_LIFETIME: int = 120
 
     class Config:
         env_file = ".env"

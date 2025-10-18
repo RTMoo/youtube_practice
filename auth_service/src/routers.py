@@ -20,7 +20,7 @@ from .schemas import (
 )
 from .services import UserServiceDep
 from .settings import security, settings
-from .utils import hash_password, verify_password
+from .utils import generate_token, hash_password, verify_password
 
 router = APIRouter()
 rb_router = RabbitRouter(settings.FASTSTREAM_RABBITMQ_URL)
@@ -53,9 +53,25 @@ async def pre_register(
     except IntegrityError:
         pass
 
+    token = generate_token()
+
+    await cache.set(
+        name=f"verify:email:{token}",
+        ex=settings.VERIFY_TOKEN_LIFETIME,
+        value=payload.email,
+    )
+    await cache.set(
+        name=f"verify:token:{payload.email}",
+        ex=settings.VERIFY_TOKEN_LIFETIME,
+        value=token,
+    )
+
     await rb_router.broker.publish(
-        payload.email,
-        queue="send_verify_token",
+        {
+            "email": payload.email,
+            "link": settings.BASE_URL + f"verify?token={token}",
+        },
+        queue="resend_verify_token",
     )
 
     return {"status": "OK"}
@@ -128,7 +144,7 @@ async def resend_verification(
     existing_ttl = await cache.ttl(key)
 
     if existing_ttl > 0:
-        time_passed = settings.TOKEN_LIFETIME - existing_ttl
+        time_passed = settings.VERIFY_TOKEN_LIFETIME - existing_ttl
         remains = settings.MIN_RESEND_TOKEN_LIFETIME - time_passed
 
         if remains > 0:
@@ -142,10 +158,26 @@ async def resend_verification(
             detail="Токен не найден или истёк. Пройдите регистрацию заново.",
         )
     token = await cache.get(key)
-    await cache.delete(f"verify:token:{payload.email}", f"email:{token}")
+    await cache.delete(f"verify:token:{payload.email}", f"verify:email:{token}")
+
+    token = generate_token()
+
+    await cache.set(
+        name=f"verify:email:{token}",
+        ex=settings.VERIFY_TOKEN_LIFETIME,
+        value=payload.email,
+    )
+    await cache.set(
+        name=f"verify:token:{payload.email}",
+        ex=settings.VERIFY_TOKEN_LIFETIME,
+        value=token,
+    )
 
     await rb_router.broker.publish(
-        payload.email,
+        {
+            "email": payload.email,
+            "link": settings.BASE_URL + f"verify?token={token}",
+        },
         queue="resend_verify_token",
     )
 
@@ -166,9 +198,14 @@ async def verify_email(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Токен истек либо не запрашивался",
         )
-    email = email.decode()
 
-    user = await user_service.get(email=email)
+    user = await user_service.get(email=email.decode())
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Пользователь не найден",
+        )
 
     if user and user.email_verified:
         raise HTTPException(
@@ -180,7 +217,7 @@ async def verify_email(
     data["email_verified"] = True
     data["password"] = hash_password(data["password"])
 
-    await user_service.update(email=email, new_data=data)
+    await user_service.update(email=user.email, new_data=data)
 
     await cache.delete(f"verify:email:{token}", f"verify:token:{email}")
 
@@ -224,14 +261,36 @@ async def forgot_password(
 
     user = await user_service.get(email=payload.email)
 
-    if not user or not user.email_verified:
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Пользователь не найден",
+        )
+
+    if not user.email_verified:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Почта не подтверждена.",
         )
 
+    token = generate_token()
+
+    await cache.set(
+        name=f"reset:token:{user.email}",
+        ex=settings.RESET_TOKEN_LIFETIME,
+        value=token,
+    )
+    await cache.set(
+        name=f"reset:email:{token}",
+        ex=settings.RESET_TOKEN_LIFETIME,
+        value=user.email,
+    )
+
     await rb_router.broker.publish(
-        payload.email,
+        message={
+            "email": user.email,
+            "link": settings.BASE_URL + f"reset?token={token}",
+        },
         queue="send_reset_password_token",
     )
 
