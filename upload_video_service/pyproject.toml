@@ -1,0 +1,22 @@
+[project]
+name = "upload-video-service"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.119.0",
+    "uvicorn[standart]>=0.38.0",
+]
+
+
+[tool.ruff]
+fix = true
+unsafe-fixes = true
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+lines-between-types = 1

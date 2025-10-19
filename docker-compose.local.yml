@@ -44,6 +44,21 @@ services:
     volumes:
       - ./auth_service:/auth_service
 
+  upload_video_service:
+    build:
+      context: ./upload_video_service
+      dockerfile: Dockerfile
+    container_name: upload_video_service
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis: 
+        condition: service_healthy
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./upload_video_service:/upload_video_service
+
   mail_service:
     build:
       context: ./mail_service
