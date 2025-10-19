@@ -5,8 +5,21 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "aiosmtplib>=4.0.2",
     "faststream[cli,rabbit]>=0.6.0",
+    "jinja2>=3.1.6",
     "pydantic>=2.12.0",
     "pydantic-settings>=2.11.0",
     "redis>=6.4.0",
 ]
+
+[tool.ruff]
+fix = true
+unsafe-fixes = true
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+lines-between-types = 1

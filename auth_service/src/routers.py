@@ -71,7 +71,7 @@ async def pre_register(
             "email": payload.email,
             "link": settings.BASE_URL + f"verify?token={token}",
         },
-        queue="resend_verify_token",
+        queue="send_verify_token",
     )
 
     return {"status": "OK"}
