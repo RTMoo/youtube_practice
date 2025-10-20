@@ -124,7 +124,10 @@ async def login(
         samesite="lax",
     )
 
-    return {"status": "OK"}
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+    }
 
 
 @rb_router.post("/resend_verification")
